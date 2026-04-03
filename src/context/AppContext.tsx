@@ -1,15 +1,28 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import {
-    Alert,
-    applyTradeToAccount,
-    BestPath,
-    bestPathToFunded,
-    generateAlerts,
-    isDailyLossSafe,
-    PathStyle,
-    remainingR,
+  Alert,
+  applyTradeToAccount,
+  BestPath,
+  bestPathToFunded,
+  generateAlerts,
+  isDailyLossSafe,
+  PathStyle,
+  remainingR,
 } from '../services/ruleEngine';
 import { Account, Trade } from '../types';
+
+// ─── Copytrade Input ───────────────────────────────
+
+export type CopytradeInput = {
+  accountIds: string[];
+  strategy: string;
+  direction: 'Long' | 'Short';
+  r: number;
+  entryTime: string;
+  exitTime: string;
+};
+
+// ─── Context Type ──────────────────────────────────
 
 type AppContextType = {
   accounts: Account[];
@@ -17,13 +30,8 @@ type AppContextType = {
   alerts: Alert[];
   pathStyle: PathStyle;
   setPathStyle: (style: PathStyle) => void;
-
-  profileUsername: string;
-  setProfileUsername: (username: string) => void;
-  profileImageUri: string | null;
-  setProfileImageUri: (uri: string | null) => void;
-
   addTrade: (trade: Omit<Trade, 'id' | 'createdAt'>) => void;
+  addCopytrade: (input: CopytradeInput) => void;
   addAccount: (account: Omit<Account, 'id'>) => void;
   removeAccount: (accountId: string) => void;
   getRemainingR: (account: Account) => number;
@@ -34,6 +42,8 @@ type AppContextType = {
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+// ─── Helpers ───────────────────────────────────────
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
@@ -50,14 +60,14 @@ function dayPnLForAccount(accountId: string, trades: Trade[]): number {
     .reduce((sum, t) => sum + t.pnl, 0);
 }
 
+// ─── Provider ──────────────────────────────────────
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [pathStyle, setPathStyle] = useState<PathStyle>('normal');
 
-  const [profileUsername, setProfileUsername] = useState('Trader');
-  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
-
+  // ── Add trade (with rule engine) ────────────
   const addTrade = (trade: Omit<Trade, 'id' | 'createdAt'>) => {
     const newTrade: Trade = {
       ...trade,
@@ -66,6 +76,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     const updatedTrades = [newTrade, ...trades];
+
     setTrades(updatedTrades);
 
     setAccounts((prev) =>
@@ -86,6 +97,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // ── Add copytrade (scaled by account size) ───
+  const addCopytrade = (input: CopytradeInput) => {
+    const { accountIds, strategy, direction, r, entryTime, exitTime } = input;
+    const timestamp = Date.now();
+    const newTrades: Trade[] = [];
+    const outcome: Trade['outcome'] = r >= 0 ? 'Win' : 'Loss';
+
+    accountIds.forEach((accountId, index) => {
+      const account = accounts.find((a) => a.id === accountId);
+      if (!account) return;
+
+      const oneR = account.startingBalance * 0.01;
+      const scaledPnl = r * oneR;
+
+      newTrades.push({
+        id: `${timestamp}-${index}`,
+        accountIds: [accountId],
+        strategy,
+        direction,
+        outcome,
+        entryTime,
+        exitTime,
+        pnl: scaledPnl,
+        r,
+        createdAt: new Date().toISOString(),
+      });
+    });
+
+    if (newTrades.length === 0) return;
+
+    const updatedTrades = [...newTrades, ...trades];
+    setTrades(updatedTrades);
+
+    setAccounts((prev) =>
+      prev.map((account) => {
+        const trade = newTrades.find((t) => t.accountIds.includes(account.id));
+        if (!trade) return account;
+
+        if (account.status === 'Failed' || account.status === 'Funded') {
+          return account;
+        }
+
+        const update = applyTradeToAccount(account, trade.pnl, updatedTrades);
+
+        return {
+          ...account,
+          ...update,
+        };
+      })
+    );
+  };
+
+  // ── Add account ─────────────────────────────
   const addAccount = (account: Omit<Account, 'id'>) => {
     const newAccount: Account = {
       ...account,
@@ -94,14 +158,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAccounts((prev) => [...prev, newAccount]);
   };
 
+  // ── Remove account ──────────────────────────
   const removeAccount = (accountId: string) => {
     setAccounts((prev) => prev.filter((a) => a.id !== accountId));
   };
 
+  // ── Derived: alerts across all accounts ─────
   const alerts = useMemo(() => {
     return accounts.flatMap((account) => generateAlerts(account, trades));
   }, [accounts, trades]);
 
+  // ── Helpers exposed to screens ──────────────
   const getRemainingR = (account: Account): number => {
     return remainingR(account);
   };
@@ -126,6 +193,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // ── Context value ───────────────────────────
   const value = useMemo(
     () => ({
       accounts,
@@ -133,11 +201,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       alerts,
       pathStyle,
       setPathStyle,
-      profileUsername,
-      setProfileUsername,
-      profileImageUri,
-      setProfileImageUri,
       addTrade,
+      addCopytrade,
       addAccount,
       removeAccount,
       getRemainingR,
@@ -146,18 +211,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getDayPnL,
       getTotalDayPnL,
     }),
-    [accounts, trades, alerts, pathStyle, profileUsername, profileImageUri]
+    [accounts, trades, alerts, pathStyle]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
+// ─── Hook ──────────────────────────────────────────
+
 export function useApp() {
   const context = useContext(AppContext);
-
   if (!context) {
     throw new Error('useApp must be used inside AppProvider');
   }
-
   return context;
 }

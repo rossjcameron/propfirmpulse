@@ -1,9 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,174 +13,92 @@ import { globalStyles } from '../../src/constants/styles';
 import { theme } from '../../src/constants/theme';
 import { typography } from '../../src/constants/typography';
 import { useApp } from '../../src/context/AppContext';
-import type { Trade } from '../../src/types';
-
-type EmotionalState = NonNullable<Trade['emotionalState']>;
-type Confidence = NonNullable<Trade['confidence']>;
-
-const EMOTION_OPTIONS: EmotionalState[] = [
-  'Calm',
-  'Focused',
-  'Confident',
-  'Anxious',
-  'FOMO',
-  'Revenge',
-];
-
-const CONFIDENCE_OPTIONS: Confidence[] = ['A+', 'High', 'Medium', 'Low'];
 
 export default function LogTradeScreen() {
-  const { accounts, addTrade } = useApp();
+  const { accounts, addCopytrade, getDayPnL } = useApp();
 
-  const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id ?? '');
-  const [strategy, setStrategy] = useState('NY ORB');
-  const [direction, setDirection] = useState<'Long' | 'Short'>('Long');
-  const [outcome, setOutcome] = useState<'Win' | 'Loss'>('Win');
-  const [pnl, setPnl] = useState('');
-  const [risk, setRisk] = useState('');
-  const [entryTime, setEntryTime] = useState(getCurrentTimeString());
-  const [exitTime, setExitTime] = useState(getCurrentTimeString());
-  const [emotionalState, setEmotionalState] = useState<EmotionalState>('Focused');
-  const [confidence, setConfidence] = useState<Confidence>('Medium');
-  const [notes, setNotes] = useState('');
-  const [lessons, setLessons] = useState('');
-  const [screenshotUri, setScreenshotUri] = useState<string | null>(null);
-  const [focusedField, setFocusedField] = useState<string | null>(null);
-
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.id === selectedAccountId),
-    [accounts, selectedAccountId]
+  const activeAccounts = accounts.filter(
+    (a) => a.status !== 'Failed'
   );
 
-  const pickScreenshot = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [strategy, setStrategy] = useState('NY ORB');
+  const [direction, setDirection] = useState<'Long' | 'Short'>('Long');
+  const [rInput, setRInput] = useState('');
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
-    if (!permission.granted) {
-      Alert.alert(
-        'Permission needed',
-        'Please allow photo library access to attach a screenshot.'
-      );
-      return;
-    }
+  const allSelected =
+    activeAccounts.length > 0 &&
+    selectedAccountIds.length === activeAccounts.length;
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 1,
-    });
+  const isCopytrade = selectedAccountIds.length > 1;
 
-    if (!result.canceled && result.assets?.length) {
-      setScreenshotUri(result.assets[0].uri);
-    }
-  };
-
-  const removeScreenshot = () => {
-    setScreenshotUri(null);
-  };
-
-  const submitTrade = () => {
-    const rawPnl = Number(pnl);
-    const riskNumber = Number(risk);
-
-    if (
-      !selectedAccountId ||
-      !strategy.trim() ||
-      Number.isNaN(rawPnl) ||
-      Number.isNaN(riskNumber) ||
-      riskNumber <= 0
-    ) {
-      Alert.alert('Missing info', 'Please complete the required fields.');
-      return;
-    }
-
-    if (!isValidTime(entryTime) || !isValidTime(exitTime)) {
-      Alert.alert('Invalid time', 'Use HH:MM format for entry and exit time.');
-      return;
-    }
-
-    const entryIso = buildTodayIso(entryTime);
-    const exitIso = buildTodayIso(exitTime);
-
-    if (new Date(exitIso).getTime() < new Date(entryIso).getTime()) {
-      Alert.alert('Invalid duration', 'Exit time must be after entry time.');
-      return;
-    }
-
-    const normalisedPnl =
-      outcome === 'Win' ? Math.abs(rawPnl) : -Math.abs(rawPnl);
-
-    addTrade({
-      accountIds: [selectedAccountId],
-      strategy: strategy.trim(),
-      direction,
-      outcome,
-      entryTime: entryIso,
-      exitTime: exitIso,
-      pnl: normalisedPnl,
-      r: normalisedPnl / riskNumber,
-      screenshotUrl: screenshotUri ?? undefined,
-      emotionalState,
-      confidence,
-      notes: notes.trim() || undefined,
-      lessons: lessons.trim() || undefined,
-    });
-
-    setStrategy('NY ORB');
-    setDirection('Long');
-    setOutcome('Win');
-    setPnl('');
-    setRisk('');
-    setEntryTime(getCurrentTimeString());
-    setExitTime(getCurrentTimeString());
-    setEmotionalState('Focused');
-    setConfidence('Medium');
-    setNotes('');
-    setLessons('');
-    setScreenshotUri(null);
-
-    Alert.alert('Saved', 'Trade journal entry added.');
-  };
-
-  const signedPreviewPnl =
-    pnl.trim() !== '' && !Number.isNaN(Number(pnl))
-      ? outcome === 'Win'
-        ? Math.abs(Number(pnl))
-        : -Math.abs(Number(pnl))
-      : null;
-
-  const rValue =
-    signedPreviewPnl != null && risk && Number(risk) > 0
-      ? signedPreviewPnl / Number(risk)
-      : null;
-
-  const durationPreview =
-    isValidTime(entryTime) && isValidTime(exitTime)
-      ? getDurationLabel(buildTodayIso(entryTime), buildTodayIso(exitTime))
-      : '—';
-
-  if (accounts.length === 0) {
-    return (
-      <SafeAreaView style={globalStyles.screen} edges={['top']}>
-        <ScrollView
-          style={globalStyles.screen}
-          contentContainerStyle={globalStyles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={[globalStyles.title, styles.title]}>Log Trade</Text>
-
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="wallet-outline" size={38} color={theme.colors.textDim} />
-            </View>
-            <Text style={styles.emptyTitle}>Add an account first</Text>
-            <Text style={styles.emptyBody}>
-              You need at least one account before you can journal a trade.
-            </Text>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+  // ── Toggle account selection ──────────────────
+  const toggleAccount = (id: string) => {
+    setSelectedAccountIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
-  }
+  };
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedAccountIds([]);
+    } else {
+      setSelectedAccountIds(activeAccounts.map((a) => a.id));
+    }
+  };
+
+  // ── Scaled P&L preview per account ────────────
+  const rValue = Number(rInput) || 0;
+
+  const scaledPnLs = useMemo(() => {
+    if (rValue === 0) return [];
+    return selectedAccountIds
+      .map((id) => {
+        const account = accounts.find((a) => a.id === id);
+        if (!account) return null;
+        const oneR = account.startingBalance * 0.01;
+        const pnl = rValue * oneR;
+        return { id: account.id, name: account.name, pnl, oneR, balance: account.balance };
+      })
+      .filter(Boolean) as { id: string; name: string; pnl: number; oneR: number; balance: number }[];
+  }, [rValue, selectedAccountIds, accounts]);
+
+  const totalScaledPnL = scaledPnLs.reduce((sum, s) => sum + s.pnl, 0);
+
+  // ── Daily P&L breakdown ───────────────────────
+  const dailyBreakdown = useMemo(() => {
+    if (selectedAccountIds.length === 0) return [];
+    return selectedAccountIds
+      .map((id) => {
+        const account = accounts.find((a) => a.id === id);
+        if (!account) return null;
+        const dayPnl = getDayPnL(id);
+        return { id: account.id, name: account.name, dayPnl };
+      })
+      .filter(Boolean) as { id: string; name: string; dayPnl: number }[];
+  }, [selectedAccountIds, accounts, getDayPnL]);
+
+  const totalDayPnL = dailyBreakdown.reduce((sum, d) => sum + d.dayPnl, 0);
+
+  // ── Validation ────────────────────────────────
+  const isValid = selectedAccountIds.length > 0 && rValue !== 0;
+
+  // ── Submit ────────────────────────────────────
+  const submitTrade = () => {
+    if (!isValid) return;
+
+    addCopytrade({
+      accountIds: selectedAccountIds,
+      strategy,
+      direction,
+      r: rValue,
+      entryTime: new Date().toISOString(),
+      exitTime: new Date().toISOString(),
+    });
+
+    setRInput('');
+  };
 
   return (
     <SafeAreaView style={globalStyles.screen} edges={['top']}>
@@ -194,16 +109,40 @@ export default function LogTradeScreen() {
       >
         <Text style={[globalStyles.title, styles.title]}>Log Trade</Text>
 
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Account</Text>
+        {/* ── Account Selection ────────────────────── */}
+        <Text style={[globalStyles.label, styles.fieldLabel]}>Accounts</Text>
+
+        {/* Select All toggle */}
+        {activeAccounts.length > 1 && (
+          <Pressable
+            style={[styles.allToggle, allSelected && styles.allToggleActive]}
+            onPress={toggleAll}
+          >
+            <Ionicons
+              name={allSelected ? 'checkmark-circle' : 'ellipse-outline'}
+              size={18}
+              color={allSelected ? theme.colors.primary : theme.colors.textDim}
+            />
+            <Text style={[styles.allToggleText, allSelected && { color: theme.colors.primary }]}>
+              All accounts {isCopytrade ? '(copytrade)' : ''}
+            </Text>
+          </Pressable>
+        )}
+
         <View style={styles.chipWrap}>
-          {accounts.map((account) => {
-            const active = selectedAccountId === account.id;
+          {activeAccounts.map((account) => {
+            const active = selectedAccountIds.includes(account.id);
             return (
               <Pressable
                 key={account.id}
-                onPress={() => setSelectedAccountId(account.id)}
+                onPress={() => toggleAccount(account.id)}
                 style={[styles.chip, active && styles.chipActive]}
               >
+                <Ionicons
+                  name={active ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={14}
+                  color={active ? theme.colors.primary : theme.colors.textDim}
+                />
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>
                   {account.name}
                 </Text>
@@ -212,17 +151,13 @@ export default function LogTradeScreen() {
           })}
         </View>
 
-        {selectedAccount && (
-          <View style={styles.selectedAccountCard}>
-            <Text style={styles.selectedAccountName}>{selectedAccount.name}</Text>
-            <Text style={styles.selectedAccountMeta}>
-              Balance ${selectedAccount.balance.toLocaleString()} · Profit{' '}
-              {selectedAccount.currentProfit >= 0 ? '+' : '-'}$
-              {Math.abs(selectedAccount.currentProfit).toLocaleString()}
-            </Text>
-          </View>
+        {activeAccounts.length === 0 && (
+          <Text style={styles.noAccountsHint}>
+            Add an account first to start logging trades.
+          </Text>
         )}
 
+        {/* ── Direction Toggle ─────────────────────── */}
         <Text style={[globalStyles.label, styles.fieldLabel]}>Direction</Text>
         <View style={styles.toggleRow}>
           <Pressable
@@ -264,47 +199,7 @@ export default function LogTradeScreen() {
           </Pressable>
         </View>
 
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Outcome</Text>
-        <View style={styles.toggleRow}>
-          <Pressable
-            style={[styles.toggle, outcome === 'Win' && styles.toggleLongActive]}
-            onPress={() => setOutcome('Win')}
-          >
-            <Ionicons
-              name="checkmark-circle"
-              size={16}
-              color={outcome === 'Win' ? theme.colors.profit : theme.colors.textDim}
-            />
-            <Text
-              style={[
-                styles.toggleText,
-                outcome === 'Win' && { color: theme.colors.profit },
-              ]}
-            >
-              Win
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.toggle, outcome === 'Loss' && styles.toggleShortActive]}
-            onPress={() => setOutcome('Loss')}
-          >
-            <Ionicons
-              name="close-circle"
-              size={16}
-              color={outcome === 'Loss' ? theme.colors.loss : theme.colors.textDim}
-            />
-            <Text
-              style={[
-                styles.toggleText,
-                outcome === 'Loss' && { color: theme.colors.loss },
-              ]}
-            >
-              Loss
-            </Text>
-          </Pressable>
-        </View>
-
+        {/* ── Strategy ─────────────────────────────── */}
         <Text style={[globalStyles.label, styles.fieldLabel]}>Strategy</Text>
         <TextInput
           value={strategy}
@@ -319,241 +214,109 @@ export default function LogTradeScreen() {
           onBlur={() => setFocusedField(null)}
         />
 
-        <View style={styles.inputRow}>
-          <View style={styles.inputHalf}>
-            <Text style={[globalStyles.label, styles.fieldLabel]}>P&amp;L Amount ($)</Text>
-            <TextInput
-              value={pnl}
-              onChangeText={setPnl}
-              style={[
-                globalStyles.input,
-                focusedField === 'pnl' && globalStyles.inputFocused,
-              ]}
-              keyboardType="numeric"
-              placeholder="0.00"
-              placeholderTextColor={theme.colors.textDim}
-              onFocus={() => setFocusedField('pnl')}
-              onBlur={() => setFocusedField(null)}
-            />
-          </View>
-
-          <View style={styles.inputHalf}>
-            <Text style={[globalStyles.label, styles.fieldLabel]}>Risk ($)</Text>
-            <TextInput
-              value={risk}
-              onChangeText={setRisk}
-              style={[
-                globalStyles.input,
-                focusedField === 'risk' && globalStyles.inputFocused,
-              ]}
-              keyboardType="numeric"
-              placeholder="0.00"
-              placeholderTextColor={theme.colors.textDim}
-              onFocus={() => setFocusedField('risk')}
-              onBlur={() => setFocusedField(null)}
-            />
-          </View>
-        </View>
-
-        <View style={styles.inputRow}>
-          <View style={styles.inputHalf}>
-            <Text style={[globalStyles.label, styles.fieldLabel]}>Entry Time</Text>
-            <TextInput
-              value={entryTime}
-              onChangeText={setEntryTime}
-              style={[
-                globalStyles.input,
-                focusedField === 'entryTime' && globalStyles.inputFocused,
-              ]}
-              placeholder="HH:MM"
-              placeholderTextColor={theme.colors.textDim}
-              onFocus={() => setFocusedField('entryTime')}
-              onBlur={() => setFocusedField(null)}
-            />
-          </View>
-
-          <View style={styles.inputHalf}>
-            <Text style={[globalStyles.label, styles.fieldLabel]}>Exit Time</Text>
-            <TextInput
-              value={exitTime}
-              onChangeText={setExitTime}
-              style={[
-                globalStyles.input,
-                focusedField === 'exitTime' && globalStyles.inputFocused,
-              ]}
-              placeholder="HH:MM"
-              placeholderTextColor={theme.colors.textDim}
-              onFocus={() => setFocusedField('exitTime')}
-              onBlur={() => setFocusedField(null)}
-            />
-          </View>
-        </View>
-
-        <View style={styles.infoStrip}>
-          <Text style={styles.infoStripLabel}>Duration</Text>
-          <Text style={styles.infoStripValue}>{durationPreview}</Text>
-        </View>
-
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Emotional State</Text>
-        <View style={styles.chipWrap}>
-          {EMOTION_OPTIONS.map((option) => {
-            const active = emotionalState === option;
-            return (
-              <Pressable
-                key={option}
-                onPress={() => setEmotionalState(option)}
-                style={[styles.quickChip, active && styles.quickChipActive]}
-              >
-                <Text style={[styles.quickChipText, active && styles.quickChipTextActive]}>
-                  {option}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Confidence</Text>
-        <View style={styles.chipWrap}>
-          {CONFIDENCE_OPTIONS.map((option) => {
-            const active = confidence === option;
-            return (
-              <Pressable
-                key={option}
-                onPress={() => setConfidence(option)}
-                style={[styles.quickChip, active && styles.quickChipActive]}
-              >
-                <Text style={[styles.quickChipText, active && styles.quickChipTextActive]}>
-                  {option}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {rValue != null && signedPreviewPnl != null && (
-          <View style={styles.rPreview}>
-            <View>
-              <Text style={styles.rPreviewLabel}>Trade result</Text>
-              <Text
-                style={[
-                  styles.rPreviewPnl,
-                  {
-                    color:
-                      signedPreviewPnl >= 0 ? theme.colors.profit : theme.colors.loss,
-                  },
-                ]}
-              >
-                {signedPreviewPnl >= 0 ? '+' : '-'}$
-                {Math.abs(signedPreviewPnl).toLocaleString()}
-              </Text>
-            </View>
-
-            <View style={styles.rPreviewRight}>
-              <Text style={styles.rPreviewLabel}>Trade R</Text>
-              <Text
-                style={[
-                  styles.rPreviewValue,
-                  { color: rValue >= 0 ? theme.colors.profit : theme.colors.loss },
-                ]}
-              >
-                {rValue >= 0 ? '+' : ''}
-                {rValue.toFixed(2)}R
-              </Text>
-            </View>
-          </View>
-        )}
-
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Notes</Text>
+        {/* ── R Input ──────────────────────────────── */}
+        <Text style={[globalStyles.label, styles.fieldLabel]}>Trade Result (R)</Text>
         <TextInput
-          value={notes}
-          onChangeText={setNotes}
-          style={[styles.textArea, focusedField === 'notes' && globalStyles.inputFocused]}
-          placeholder="What did you see? Why did you take it?"
-          placeholderTextColor={theme.colors.textDim}
-          multiline
-          textAlignVertical="top"
-          onFocus={() => setFocusedField('notes')}
-          onBlur={() => setFocusedField(null)}
-        />
-
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Lessons</Text>
-        <TextInput
-          value={lessons}
-          onChangeText={setLessons}
+          value={rInput}
+          onChangeText={setRInput}
           style={[
-            styles.textArea,
-            focusedField === 'lessons' && globalStyles.inputFocused,
+            globalStyles.input,
+            focusedField === 'r' && globalStyles.inputFocused,
           ]}
-          placeholder="What would you repeat or change next time?"
+          keyboardType="numeric"
+          placeholder="e.g. 2 for a win, -1 for a loss"
           placeholderTextColor={theme.colors.textDim}
-          multiline
-          textAlignVertical="top"
-          onFocus={() => setFocusedField('lessons')}
+          onFocus={() => setFocusedField('r')}
           onBlur={() => setFocusedField(null)}
         />
 
-        <Text style={[globalStyles.label, styles.fieldLabel]}>Screenshot</Text>
-        {screenshotUri ? (
-          <View style={styles.screenshotCard}>
-            <Image source={{ uri: screenshotUri }} style={styles.screenshotImage} />
-            <View style={styles.screenshotActions}>
-              <Pressable style={styles.secondaryButton} onPress={pickScreenshot}>
-                <Text style={styles.secondaryButtonText}>Replace</Text>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={removeScreenshot}>
-                <Text style={styles.secondaryButtonText}>Remove</Text>
-              </Pressable>
+        {/* ── Scaled P&L Preview ───────────────────── */}
+        {scaledPnLs.length > 0 && (
+          <View style={styles.previewCard}>
+            <View style={styles.previewHeader}>
+              <Text style={styles.previewTitle}>
+                {isCopytrade ? 'Copytrade Preview' : 'Trade Preview'}
+              </Text>
+              <Text
+                style={[
+                  styles.previewTotalValue,
+                  { color: totalScaledPnL >= 0 ? theme.colors.profit : theme.colors.loss },
+                ]}
+              >
+                {totalScaledPnL >= 0 ? '+' : ''}${totalScaledPnL.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+              </Text>
             </View>
+
+            {scaledPnLs.map((item) => {
+              const isPositive = item.pnl >= 0;
+              return (
+                <View key={item.id} style={styles.previewRow}>
+                  <View style={styles.previewRowLeft}>
+                    <Text style={styles.previewAccountName}>{item.name}</Text>
+                    <Text style={styles.previewMeta}>1R = ${item.oneR.toLocaleString()}</Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.previewPnl,
+                      { color: isPositive ? theme.colors.profit : theme.colors.loss },
+                    ]}
+                  >
+                    {isPositive ? '+' : ''}${item.pnl.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
-        ) : (
-          <Pressable style={styles.uploadCard} onPress={pickScreenshot}>
-            <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
-            <Text style={styles.uploadTitle}>Add screenshot</Text>
-            <Text style={styles.uploadBody}>
-              Optional. Attach a chart or execution screenshot without forcing a crop.
-            </Text>
-          </Pressable>
         )}
 
-        <Pressable onPress={submitTrade} style={[globalStyles.buttonPrimary, styles.button]}>
+        {/* ── Daily Group P&L ──────────────────────── */}
+        {selectedAccountIds.length > 0 && (
+          <View style={styles.dayCard}>
+            <View style={styles.dayHeader}>
+              <Text style={styles.dayTitle}>Today&apos;s P&amp;L</Text>
+              <Text
+                style={[
+                  styles.dayTotal,
+                  { color: totalDayPnL >= 0 ? theme.colors.profit : theme.colors.loss },
+                ]}
+              >
+                {totalDayPnL >= 0 ? '+' : ''}${totalDayPnL.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+              </Text>
+            </View>
+
+            {dailyBreakdown.map((item) => {
+              const isPositive = item.dayPnl >= 0;
+              return (
+                <View key={item.id} style={styles.dayRow}>
+                  <Text style={styles.dayAccountName}>{item.name}</Text>
+                  <Text
+                    style={[
+                      styles.dayAccountPnl,
+                      { color: item.dayPnl === 0 ? theme.colors.textDim : (isPositive ? theme.colors.profit : theme.colors.loss) },
+                    ]}
+                  >
+                    {item.dayPnl === 0 ? '$0' : `${isPositive ? '+' : ''}$${item.dayPnl.toLocaleString()}`}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Submit ───────────────────────────────── */}
+        <Pressable
+          onPress={submitTrade}
+          style={[globalStyles.buttonPrimary, styles.button, !isValid && styles.buttonDisabled]}
+          disabled={!isValid}
+        >
           <Ionicons name="checkmark-circle" size={18} color="#050507" />
-          <Text style={globalStyles.buttonPrimaryText}>Save Trade</Text>
+          <Text style={globalStyles.buttonPrimaryText}>
+            {isCopytrade ? `Save to ${selectedAccountIds.length} Accounts` : 'Save Trade'}
+          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-function getCurrentTimeString() {
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mm = String(now.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
-function isValidTime(value: string) {
-  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim());
-}
-
-function buildTodayIso(time: string) {
-  const [hours, minutes] = time.split(':').map(Number);
-  const date = new Date();
-  date.setHours(hours, minutes, 0, 0);
-  return date.toISOString();
-}
-
-function getDurationLabel(entryIso: string, exitIso: string) {
-  const diffMs = new Date(exitIso).getTime() - new Date(entryIso).getTime();
-
-  if (diffMs <= 0) return '0m';
-
-  const totalMinutes = Math.floor(diffMs / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
 }
 
 const styles = StyleSheet.create({
@@ -565,17 +328,43 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
 
+  // All toggle
+  allToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: theme.colors.cardAlt,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  allToggleActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primaryGlow,
+  },
+  allToggleText: {
+    color: theme.colors.textMuted,
+    ...typography.bodyMedium,
+  },
+
+  // Account chips
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: theme.colors.cardAlt,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius.pill,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 10,
   },
   chipActive: {
@@ -591,24 +380,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  selectedAccountCard: {
-    backgroundColor: theme.colors.card,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    marginTop: 12,
-  },
-  selectedAccountName: {
-    color: theme.colors.text,
-    ...typography.cardTitle,
-  },
-  selectedAccountMeta: {
+  noAccountsHint: {
     color: theme.colors.textDim,
-    ...typography.caption,
-    marginTop: 4,
+    ...typography.body,
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 
+  // Direction toggles
   toggleRow: {
     flexDirection: 'row',
     gap: 12,
@@ -639,184 +418,109 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  inputRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  inputHalf: {
-    flex: 1,
-  },
-
-  quickChip: {
-    backgroundColor: theme.colors.cardAlt,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.pill,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  quickChipActive: {
-    backgroundColor: theme.colors.primaryGlow,
-    borderColor: theme.colors.primary,
-  },
-  quickChipText: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  quickChipTextActive: {
-    color: theme.colors.primary,
-    fontWeight: '700',
-  },
-
-  infoStrip: {
-    marginTop: theme.spacing.md,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.cardAlt,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  infoStripLabel: {
-    color: theme.colors.textMuted,
-    ...typography.bodyMedium,
-  },
-  infoStripValue: {
-    color: theme.colors.text,
-    ...typography.mono,
-  },
-
-  rPreview: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: theme.colors.cardAlt,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginTop: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  rPreviewLabel: {
-    color: theme.colors.textMuted,
-    ...typography.bodyMedium,
-    marginBottom: 4,
-  },
-  rPreviewPnl: {
-    ...typography.mono,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  rPreviewRight: {
-    alignItems: 'flex-end',
-  },
-  rPreviewValue: {
-    ...typography.monoLarge,
-  },
-
-  textArea: {
-    backgroundColor: theme.colors.cardAlt,
-    borderColor: theme.colors.border,
-    borderWidth: 1,
-    borderRadius: theme.radius.sm,
-    color: theme.colors.text,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    fontWeight: '500',
-    minHeight: 108,
-  },
-
-  uploadCard: {
-    marginTop: 4,
-    backgroundColor: theme.colors.cardAlt,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderStyle: 'dashed',
-    padding: theme.spacing.lg,
-    alignItems: 'center',
-  },
-  uploadTitle: {
-    color: theme.colors.text,
-    ...typography.cardTitle,
-    marginTop: 10,
-  },
-  uploadBody: {
-    color: theme.colors.textDim,
-    ...typography.body,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginTop: 6,
-  },
-
-  screenshotCard: {
-    marginTop: 4,
+  // Scaled P&L preview
+  previewCard: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    overflow: 'hidden',
+    padding: theme.spacing.md,
+    marginTop: theme.spacing.lg,
     ...theme.shadows.card,
   },
-  screenshotImage: {
-    width: '100%',
-    height: 220,
-    backgroundColor: theme.colors.cardAlt,
-  },
-  screenshotActions: {
+  previewHeader: {
     flexDirection: 'row',
-    gap: 10,
-    padding: theme.spacing.md,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
-  secondaryButton: {
+  previewTitle: {
+    color: theme.colors.text,
+    ...typography.cardTitle,
+  },
+  previewTotalValue: {
+    ...typography.mono,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  previewRowLeft: {
     flex: 1,
-    backgroundColor: theme.colors.cardAlt,
+    gap: 2,
+  },
+  previewAccountName: {
+    color: theme.colors.text,
+    ...typography.bodyMedium,
+  },
+  previewMeta: {
+    color: theme.colors.textDim,
+    ...typography.caption,
+  },
+  previewPnl: {
+    ...typography.mono,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  // Daily P&L card
+  dayCard: {
+    backgroundColor: theme.colors.card,
+    borderRadius: theme.radius.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    borderRadius: theme.radius.sm,
-    paddingVertical: 12,
-    alignItems: 'center',
+    padding: theme.spacing.md,
+    marginTop: theme.spacing.sm,
+    ...theme.shadows.card,
   },
-  secondaryButtonText: {
+  dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  dayTitle: {
     color: theme.colors.text,
+    ...typography.cardTitle,
+  },
+  dayTotal: {
+    ...typography.mono,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  dayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  dayAccountName: {
+    color: theme.colors.textMuted,
+    ...typography.body,
+  },
+  dayAccountPnl: {
+    ...typography.mono,
     fontSize: 13,
     fontWeight: '600',
   },
 
+  // Submit button
   button: {
     marginTop: theme.spacing.lg,
     flexDirection: 'row',
     gap: 8,
   },
-
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    gap: 12,
-  },
-  emptyIcon: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    backgroundColor: theme.colors.cardAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: {
-    color: theme.colors.text,
-    ...typography.sectionTitle,
-  },
-  emptyBody: {
-    color: theme.colors.textDim,
-    ...typography.body,
-    textAlign: 'center',
-    maxWidth: 280,
-    lineHeight: 20,
+  buttonDisabled: {
+    opacity: 0.4,
   },
 });
